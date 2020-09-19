@@ -27,8 +27,6 @@ namespace OpenEFI_RemoteBuild.Controllers
         public IActionResult Get(string id)
         {
             if (id.Length == 0) return BadRequest(new { errorCode = 0, errorTXT = "dame el ID no sea tarado mijo" });
-
-            _logger.LogInformation("Me llego el id: {Id}", id);
             IBuildStatus data = BuildStatus(id);
 
             if (data != null)

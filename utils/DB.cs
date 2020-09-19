@@ -64,5 +64,26 @@ namespace OpenEFI_RemoteBuild.DB
             return false;
         }
 
+        public static bool AddBuild(string ID)
+        {
+            MySqlConnection _DBC = createConnection();
+            string query = $"INSERT INTO `builds`( `HASH`, `STATUS`, `BUILD_INFO`) VALUES ('{ID}','BUILD_INIT','')";
+            MySqlCommand CDB = new MySqlCommand(query, _DBC);
+            CDB.CommandTimeout = 60;
+            try
+            {
+                _DBC.Open();
+                CDB.ExecuteReader();
+                _DBC.Close();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("ooops");
+                Console.WriteLine(ex);
+            }
+            return false;
+        }
+
     }
 }

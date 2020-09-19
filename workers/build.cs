@@ -7,13 +7,19 @@ using System.Diagnostics;
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.IO;
+using System.Text;
+
 using static OpenEFI_RemoteBuild.DB.DBController;
+using static OpenEFI_RemoteBuild.TemplateEngine.Templates;
 
 
 namespace OpenEFI_RemoteBuild.Workers
 {
     public static class ProcessWorkers
     {
+
+
         public static string MakeBuild(ILogger _logger, BuildRequest data)
         {
             var BuildWorker = new BackgroundWorker()
@@ -25,12 +31,12 @@ namespace OpenEFI_RemoteBuild.Workers
             BuildWorker.DoWork += Build;
             BuildWorker.RunWorkerCompleted += FinishBuild;
             string _hash = SHA512(JsonSerializer.Serialize(data));
-            UpdateBuildStatus(_hash, "PREBUILD_CHECKS");
+            AddBuild(_hash);
 
             if (PreBuildChecks(data))
             {
                 UpdateBuildStatus(_hash, "PREBUILD_INIT_FILES");
-                BuildWorker.RunWorkerAsync(new { Hash = _hash, logger = _logger });
+                BuildWorker.RunWorkerAsync(new { Hash = _hash, logger = _logger, reqData = data });
             }
             else
             {
@@ -43,21 +49,32 @@ namespace OpenEFI_RemoteBuild.Workers
 
         public static void Build(object sender, DoWorkEventArgs e)
         {
+            // traigo los argumentos del worker
             dynamic args = e.Argument;
             string hash = args.Hash ?? "no mandaste un pingo";
+            string subhash = hash.Substring(0, 8);
+            BuildRequest data = args.reqData;
+            // y, primero los files viste gato
+            if (!InitBuildFiles(subhash))
+            {
+                UpdateBuildStatus(hash, "PREBUILD_INIT_FILES_ERROR");
+                return;
+            }
+            CreateDefineFile(subhash, data);
+            // ahora si arranca el build posta:
             ILogger _logger = args.logger;
             UpdateBuildStatus(hash, "BUILD_INIT");
             int code = 0;
             using (var process = new Process())
             {
                 process.StartInfo.FileName = @"/home/fdsoftware/.platformio/penv/bin/pio";
-                process.StartInfo.Arguments = @"run -d ./files/demo";
+                process.StartInfo.Arguments = $@"run -d ./files/{subhash}";
                 process.StartInfo.CreateNoWindow = true;
                 process.StartInfo.UseShellExecute = false;
                 process.StartInfo.RedirectStandardOutput = true;
                 process.StartInfo.RedirectStandardError = true;
                 //process.OutputDataReceived += (sender, data) => _logger.LogInformation(data.Data);
-                //process.ErrorDataReceived += (sender, data) => _logger.LogError(data.Data);
+                process.ErrorDataReceived += (sender, data) => _logger.LogError(data.Data);
                 process.Start();
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
@@ -66,9 +83,8 @@ namespace OpenEFI_RemoteBuild.Workers
 
                 _logger.LogInformation($"VAMO MENEEE QUE TERMINO {code}");
             }
-            e.Result = new { hash = hash, code = code, logger = _logger };
+            e.Result = new { hash = hash, code = code, logger = _logger, path = $"./files/{subhash}" };
         }
-
         public static void FinishBuild(object sender, RunWorkerCompletedEventArgs e)
         {
             dynamic args = e.Result;
@@ -85,20 +101,50 @@ namespace OpenEFI_RemoteBuild.Workers
             {
                 logger.LogCritical($"Build ID {hash.Substring(0, 8)}, has error in build");
                 UpdateBuildStatus(hash, "BUILD_FAILED");
-
             }
+            try
+            {
+                Directory.Delete((string)args.path, true);
+            }
+            catch (System.Exception)
+            {
+                
+                throw;
+            }
+            
         }
 
         public static bool PreBuildChecks(BuildRequest data)
         {
             //TODO: agarrar la pala
+            //UpdateBuildStatus(_hash, "PREBUILD_CHECKS");
             return true;
         }
 
         public static bool InitBuildFiles(string BUILD_ID)
         {
-            //TODO: agarrar la pala x2
-            return true;
+            string sourcePath = $@"./files/demo";
+            string targetPath = $@"./files/{BUILD_ID}";
+
+            try
+            {
+                if (!System.IO.Directory.Exists(targetPath))
+                {
+                    System.IO.Directory.CreateDirectory(targetPath);
+                    foreach (string dir in System.IO.Directory.GetDirectories(sourcePath, "*", System.IO.SearchOption.AllDirectories))
+                    {
+                        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(targetPath, dir.Substring(sourcePath.Length + 1)));
+                    }
+
+                    foreach (string file_name in System.IO.Directory.GetFiles(sourcePath, "*", System.IO.SearchOption.AllDirectories))
+                    {
+                        System.IO.File.Copy(file_name, System.IO.Path.Combine(targetPath, file_name.Substring(sourcePath.Length + 1)));
+                    }
+                }
+                return true;
+            }
+            catch { }
+            return false;
         }
 
         public static string SHA512(string input)
@@ -117,6 +163,5 @@ namespace OpenEFI_RemoteBuild.Workers
             }
         }
     }
-
 
 }
