@@ -43,5 +43,26 @@ namespace OpenEFI_RemoteBuild.DB
             result = null;
             return result;
         }
+        public static bool UpdateBuildStatus(string ID, string newState)
+        {
+            MySqlConnection _DBC = createConnection();
+            string query = $"UPDATE `builds` SET `STATUS`='{newState}' WHERE `HASH`= '{ID}'";
+            MySqlCommand CDB = new MySqlCommand(query, _DBC);
+            CDB.CommandTimeout = 60;
+            try
+            {
+                _DBC.Open();
+                CDB.ExecuteReader();
+                _DBC.Close();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("ooops");
+                Console.WriteLine(ex);
+            }
+            return false;
+        }
+
     }
 }

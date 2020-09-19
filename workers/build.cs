@@ -5,12 +5,16 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.ComponentModel;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using static OpenEFI_RemoteBuild.DB.DBController;
+
 
 namespace OpenEFI_RemoteBuild.Workers
 {
     public static class ProcessWorkers
     {
-        public static string MakeBuild(ILogger _logger)
+        public static string MakeBuild(ILogger _logger, BuildRequest data)
         {
             var BuildWorker = new BackgroundWorker()
             {
@@ -20,17 +24,30 @@ namespace OpenEFI_RemoteBuild.Workers
 
             BuildWorker.DoWork += Build;
             BuildWorker.RunWorkerCompleted += FinishBuild;
-            string _hash = SHA512("asdasda");
-            BuildWorker.RunWorkerAsync(new { Hash = _hash, logger = _logger });
+            string _hash = SHA512(JsonSerializer.Serialize(data));
+            UpdateBuildStatus(_hash, "PREBUILD_CHECKS");
+
+            if (PreBuildChecks(data))
+            {
+                UpdateBuildStatus(_hash, "PREBUILD_INIT_FILES");
+                BuildWorker.RunWorkerAsync(new { Hash = _hash, logger = _logger });
+            }
+            else
+            {
+                _logger.LogCritical("fail in prebuilds checks");
+                UpdateBuildStatus(_hash, "PREBUILD_CHECK_FAIL");
+            }
+
             return _hash;
         }
 
         public static void Build(object sender, DoWorkEventArgs e)
         {
             dynamic args = e.Argument;
-            string txt = args.Hash ?? "no mandaste un pingo";
+            string hash = args.Hash ?? "no mandaste un pingo";
             ILogger _logger = args.logger;
-
+            UpdateBuildStatus(hash, "BUILD_INIT");
+            int code = 0;
             using (var process = new Process())
             {
                 process.StartInfo.FileName = @"/home/fdsoftware/.platformio/penv/bin/pio";
@@ -45,18 +62,44 @@ namespace OpenEFI_RemoteBuild.Workers
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
                 var exited = process.WaitForExit(1000 * 100);
-                var code = exited ? process.ExitCode : -1;
+                code = exited ? process.ExitCode : -1;
+
                 _logger.LogInformation($"VAMO MENEEE QUE TERMINO {code}");
             }
-            e.Result = "eso lo revoleo al void para cuando termino el trabajo";
+            e.Result = new { hash = hash, code = code, logger = _logger };
         }
 
         public static void FinishBuild(object sender, RunWorkerCompletedEventArgs e)
         {
-            Console.WriteLine("Build finalizado (Aca tendria que tirar la data a la DB pero tanto no agarro la pala)");
-            Console.WriteLine(e.Result);
+            dynamic args = e.Result;
+            int code = args.code;
+            string hash = args.hash;
+            ILogger logger = args.logger;
+
+            if (code == 0)
+            {
+                logger.LogInformation($"Build ID {hash.Substring(0, 8)}, finished");
+                UpdateBuildStatus(hash, "BUILD_SUCCES");
+            }
+            else
+            {
+                logger.LogCritical($"Build ID {hash.Substring(0, 8)}, has error in build");
+                UpdateBuildStatus(hash, "BUILD_FAILED");
+
+            }
         }
 
+        public static bool PreBuildChecks(BuildRequest data)
+        {
+            //TODO: agarrar la pala
+            return true;
+        }
+
+        public static bool InitBuildFiles(string BUILD_ID)
+        {
+            //TODO: agarrar la pala x2
+            return true;
+        }
 
         public static string SHA512(string input)
         {

@@ -51,7 +51,7 @@ namespace OpenEFI_RemoteBuild.Controllers
             {
                 return BadRequest(new { errorCode = 1, errorTxt = "No me voy a procesar nada tu request!!! SON INMUNDAS TUS REQUEST, SON INSULSAS, NO SON NADA DELICIOSAS! PORQUE VOS COCINÁS HORRIBLE!!" });
             }
-            string _build = MakeBuild(_logger);
+            string _build = MakeBuild(_logger, req_in);
             return Accepted(new { build_ID = _build });
         }
     }
